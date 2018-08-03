@@ -109,66 +109,93 @@ func Test_GenData(t *testing.T) {
 			Target:      content{Len: 235, Seed: 2345, Alter: 0},
 			Description: "Source and target both smaller then a block size.",
 		},
+		pair{
+			Source:      content{Len: 10 * DefaultBlockSize, Seed: 9824, Alter: 0},
+			Target:      content{Len: 10*DefaultBlockSize + 11, Seed: 2345, Alter: 0},
+			Description: "Source is a multiple of the block size.",
+		},
+		pair{
+			Source:      content{Len: DefaultBlockSize, Seed: 9824, Alter: 0},
+			Target:      content{Len: 235, Seed: 2345, Alter: 0},
+			Description: "Source is a single block size.",
+		},
+		pair{
+			Source:      content{Len: 245, Seed: 9824, Alter: 0},
+			Target:      content{Len: 2 * DefaultBlockSize, Seed: 2345, Alter: 0},
+			Description: "Target is a multiple of the block size.",
+		},
+		pair{
+			Source:      content{Len: 225, Seed: 9824, Alter: 0},
+			Target:      content{Len: DefaultBlockSize, Seed: 2345, Alter: 0},
+			Description: "Target is a single block size.",
+		},
+		pair{
+			Source:      content{Len: DefaultBlockSize, Seed: 9824, Alter: 0},
+			Target:      content{Len: DefaultBlockSize, Seed: 2345, Alter: 0},
+			Description: "Source and Target are a single block size.",
+		},
 	}
-	rs := &RSync{}
-	rsDelta := &RSync{}
 	for _, p := range pairs {
-		(&p.Source).Fill()
-		(&p.Target).Fill()
+		t.Run(p.Description, func(t *testing.T) {
+			rs := &RSync{}
+			rsDelta := &RSync{}
+			(&p.Source).Fill()
+			(&p.Target).Fill()
 
-		sourceBuffer := bytes.NewReader(p.Source.Data)
-		targetBuffer := bytes.NewReader(p.Target.Data)
+			sourceBuffer := bytes.NewReader(p.Source.Data)
+			targetBuffer := bytes.NewReader(p.Target.Data)
 
-		sig := make([]BlockHash, 0, 10)
-		err := rs.CreateSignature(targetBuffer, func(bl BlockHash) error {
-			sig = append(sig, bl)
-			return nil
-		})
-		if err != nil {
-			t.Errorf("Failed to create signature: %s", err)
-		}
-		opsOut := make(chan Operation)
-		go func() {
-			var blockCt, blockRangeCt, dataCt, bytes int
-			defer close(opsOut)
-			err := rsDelta.CreateDelta(sourceBuffer, sig, func(op Operation) error {
-				switch op.Type {
-				case OpBlockRange:
-					blockRangeCt++
-				case OpBlock:
-					blockCt++
-				case OpData:
-					// Copy data buffer so it may be reused in internal buffer.
-					b := make([]byte, len(op.Data))
-					copy(b, op.Data)
-					op.Data = b
-					dataCt++
-					bytes += len(op.Data)
-				}
-				opsOut <- op
+			sig := make([]BlockHash, 0, 10)
+			err := rs.CreateSignature(targetBuffer, func(bl BlockHash) error {
+				sig = append(sig, bl)
 				return nil
-			}, nil)
-			t.Logf("Range Ops:%5d, Block Ops:%5d, Data Ops: %5d, Data Len: %5dKiB, For %s.", blockRangeCt, blockCt, dataCt, bytes/1024, p.Description)
+			})
 			if err != nil {
-				t.Errorf("Failed to create delta: %s", err)
+				t.Errorf("Failed to create signature: %s", err)
 			}
-		}()
+			opsOut := make(chan Operation)
+			go func() {
+				var blockCt, blockRangeCt, dataCt, bytes int
+				defer close(opsOut)
+				err := rsDelta.CreateDelta(sourceBuffer, sig, func(op Operation) error {
+					switch op.Type {
+					case OpBlockRange:
+						blockRangeCt++
+					case OpBlock:
+						blockCt++
+					case OpData:
+						// Copy data buffer so it may be reused in internal buffer.
+						b := make([]byte, len(op.Data))
+						copy(b, op.Data)
+						op.Data = b
+						dataCt++
+						bytes += len(op.Data)
+					}
+					opsOut <- op
+					return nil
+				}, nil)
+				t.Logf("Range:%5d, Block:%5d, Data: %5d, Len: %5dKiB", blockRangeCt, blockCt, dataCt, bytes/1024)
+				if err != nil {
+					t.Errorf("Failed to create delta: %s", err)
+				}
+			}()
 
-		result := new(bytes.Buffer)
+			result := new(bytes.Buffer)
 
-		targetBuffer.Seek(0, 0)
-		err = rs.ApplyDelta(result, targetBuffer, opsOut, nil)
-		if err != nil {
-			t.Errorf("Failed to apply delta: %s", err)
-		}
+			targetBuffer.Seek(0, 0)
+			err = rs.ApplyDelta(result, targetBuffer, opsOut, nil)
+			if err != nil {
+				t.Errorf("Failed to apply delta: %s", err)
+			}
 
-		if result.Len() != len(p.Source.Data) {
-			t.Errorf("Result not same size as source: %s", p.Description)
-		} else if bytes.Equal(result.Bytes(), p.Source.Data) == false {
-			t.Errorf("Result is different from the source: %s", p.Description)
-		}
+			if result.Len() != len(p.Source.Data) {
+				t.Errorf("Result not same size as source.")
+			} else if bytes.Equal(result.Bytes(), p.Source.Data) == false {
+				t.Errorf("Result is different from the source.")
+			}
 
-		p.Source.Data = nil
-		p.Target.Data = nil
+			p.Source.Data = nil
+			p.Target.Data = nil
+		})
 	}
 }
