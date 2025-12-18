@@ -2,13 +2,14 @@
 package proto
 
 import (
-	"bitbucket.org/kardianos/rsync"
-	"bitbucket.org/kardianos/rsync/sbuffer"
 	"compress/gzip"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/kardianos/rsync"
+	"github.com/kardianos/rsync/sbuffer"
 )
 
 type Type byte
@@ -31,11 +32,11 @@ const (
 )
 
 var (
-	ErrBadMagic           = errors.New("Corrupt or incorrect data: bad magic value in stream.")
-	ErrUnknownCompression = errors.New("Unknown compression.")
-	ErrInvalidCall        = errors.New("Cannot call function while reading from set type.")
-	ErrHeaderOnce         = errors.New("Must call Header only once.")
-	ErrBadVarintRead      = errors.New("Bad varint read.")
+	ErrBadMagic           = errors.New("corrupt or incorrect data: bad magic value in stream")
+	ErrUnknownCompression = errors.New("unknown compression")
+	ErrInvalidCall        = errors.New("cannot call function while reading from set type")
+	ErrHeaderOnce         = errors.New("must call header only once")
+	ErrBadVarintRead      = errors.New("bad varint read")
 )
 
 type ErrIncorrectType struct {
@@ -43,19 +44,19 @@ type ErrIncorrectType struct {
 }
 
 func (err ErrIncorrectType) Error() string {
-	return fmt.Sprintf("Incorrect type. Expecting %d, got %d", err.Expecting, err.Actual)
+	return fmt.Sprintf("incorrect type. expecting %d, got %d", err.Expecting, err.Actual)
 }
 
 type ErrHashTooLong int
 
 func (err ErrHashTooLong) Error() string {
-	return fmt.Sprintf("Hash length too long. Length: %d, max: %d.", int(err), maxHashLength)
+	return fmt.Sprintf("hash length too long. length: %d, max: %d", int(err), maxHashLength)
 }
 
 type ErrDataTooLong int
 
 func (err ErrDataTooLong) Error() string {
-	return fmt.Sprintf("Hash length too long. Length: %d, max: %d.", int(err), maxDataLength)
+	return fmt.Sprintf("data length too long. length: %d, max: %d", int(err), maxDataLength)
 }
 
 const (
@@ -304,14 +305,10 @@ func (r *Reader) ReadAllSignatures() ([]rsync.BlockHash, error) {
 
 	reader := sbuffer.NewBuffer(r.body, 32*1024)
 
-	loop := true
-	for loop {
+	for {
 		buff, err := reader.Next(leaveTail)
-		if err != nil {
-			if err != io.EOF {
-				return nil, err
-			}
-			loop = false
+		if err != nil && err != io.EOF {
+			return nil, err
 		}
 		if len(buff) == 0 {
 			break
@@ -342,11 +339,8 @@ func (r *Reader) ReadAllSignatures() ([]rsync.BlockHash, error) {
 		reader.Used(at)
 
 		buff, err = reader.Next(hashLen)
-		if err != nil {
-			if err != io.EOF {
-				return nil, err
-			}
-			loop = false
+		if err != nil && err != io.EOF {
+			return nil, err
 		}
 		block.StrongHash = make([]byte, hashLen)
 		copy(block.StrongHash, buff[:hashLen])
@@ -370,17 +364,13 @@ func (r *Reader) ReadOperations(ops chan rsync.Operation, hashOps chan rsync.Ope
 
 	reader := sbuffer.NewBuffer(r.body, 32*1024)
 
-	loop := true
-	for loop {
+	for {
 		buff, err := reader.Next(10)
+		if err != nil && err != io.EOF {
+			return err
+		}
 		if len(buff) == 0 {
 			return nil
-		}
-		if err != nil {
-			if err != io.EOF {
-				return err
-			}
-			loop = false
 		}
 
 		op := rsync.Operation{
@@ -428,11 +418,8 @@ func (r *Reader) ReadOperations(ops chan rsync.Operation, hashOps chan rsync.Ope
 			reader.Used(at)
 
 			buff, err := reader.Next(dataLen)
-			if err != nil {
-				if err != io.EOF {
-					return err
-				}
-				loop = false
+			if err != nil && err != io.EOF {
+				return err
 			}
 			op.Data = make([]byte, dataLen)
 			copy(op.Data, buff[:dataLen])
@@ -448,6 +435,4 @@ func (r *Reader) ReadOperations(ops chan rsync.Operation, hashOps chan rsync.Ope
 			ops <- op
 		}
 	}
-
-	return nil
 }

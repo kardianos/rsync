@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	ErrNeedCap     = errors.New("Requested more then buffer size.")
-	ErrUsedTooMuch = errors.New("Used more then requested.")
+	ErrNeedCap     = errors.New("requested more then buffer size")
+	ErrUsedTooMuch = errors.New("used more then requested")
 )
 
 type buffer struct {
@@ -71,11 +71,4 @@ func (b *buffer) Used(used int) {
 	if b.tail > b.head {
 		panic(ErrUsedTooMuch)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

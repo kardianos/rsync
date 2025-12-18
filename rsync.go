@@ -3,9 +3,10 @@
 // Algorithm found at: http://www.samba.org/~tridge/phd_thesis.pdf
 //
 // Definitions
-//   Source: The final content.
-//   Target: The content to be made into final content.
-//   Signature: The sequence of hashes used to identify the content.
+//
+//	Source: The final content.
+//	Target: The content to be made into final content.
+//	Signature: The sequence of hashes used to identify the content.
 package rsync
 
 import (
@@ -228,7 +229,8 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 	var n, validTo int
 	var αPop, αPush, β, β1, β2 uint32
 	var blockIndex uint64
-	var rolling, lastRun, foundHash bool
+	var rolling, foundHash bool
+	var eof bool
 
 	// Store the previous non-data operation for combining.
 	var prevOp *Operation
@@ -288,9 +290,9 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 		return
 	}
 
-	for !lastRun {
+	for !eof || sum.tail < validTo {
 		// Determine if the buffer should be extended.
-		if sum.tail+r.BlockSize > validTo {
+		if !eof && sum.tail+r.BlockSize > validTo {
 			// Determine if the buffer should be wrapped.
 			if validTo+r.BlockSize > len(buffer) {
 				// Before wrapping the buffer, send any trailing data off.
@@ -320,12 +322,12 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 				if err != io.EOF && err != io.ErrUnexpectedEOF {
 					return err
 				}
-				lastRun = true
+				eof = true
 
 				data.head = validTo
 			}
 			if n == 0 {
-				break
+				continue
 			}
 		}
 
@@ -346,13 +348,13 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 
 		// Determine if there is a hash match.
 		foundHash = false
-		if hh, ok := hashLookup[β]; ok && !lastRun {
+		if hh, ok := hashLookup[β]; ok {
 			blockIndex, foundHash = findUniqueHash(hh, r.uniqueHash(buffer[sum.tail:sum.head]))
 		}
 		// Send data off if there is data available and a hash is found (so the buffer before it
 		// must be flushed first), or the data chunk size has reached it's maximum size (for buffer
 		// allocation purposes) or to flush the end of the data.
-		if data.tail < data.head && (foundHash || data.head-data.tail >= r.MaxDataOp || lastRun) {
+		if data.tail < data.head && (foundHash || data.head-data.tail >= r.MaxDataOp) {
 			err = enqueue(Operation{Type: OpData, Data: buffer[data.tail:data.head]})
 			if err != nil {
 				return err
@@ -376,7 +378,7 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 			data.tail = sum.tail
 		} else {
 			// The following is for the next loop iteration, so don't try to calculate if last.
-			if !lastRun && rolling {
+			if rolling {
 				αPop = uint32(buffer[sum.tail])
 			}
 			sum.tail += 1
@@ -385,6 +387,14 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 			data.head = sum.tail
 		}
 	}
+
+	if data.tail < data.head {
+		err = enqueue(Operation{Type: OpData, Data: buffer[data.tail:data.head]})
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -419,11 +429,4 @@ func βhash(block []byte) (β uint32, β1 uint32, β2 uint32) {
 	β1 = a % _M
 	β2 = b % _M
 	return
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

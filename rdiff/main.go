@@ -5,7 +5,7 @@
 package main
 
 import (
-	"bitbucket.org/kardianos/rsync"
+	"github.com/kardianos/rsync"
 
 	"bytes"
 	"crypto/md5"
@@ -17,14 +17,14 @@ import (
 	"os"
 	"strings"
 
-	"bitbucket.org/kardianos/rsync/proto"
+	"github.com/kardianos/rsync/proto"
 )
 
-var NoTargetSumError = errors.New("Checksum request but missing target hash.")
-var HashNoMatchError = errors.New("Final data hash does not match.")
+var ErrNoTargetSum = errors.New("checksum request but missing target hash")
+var ErrHashNoMatch = errors.New("final data hash does not match")
 
 var fl = flag.NewFlagSet("rdiff", flag.ExitOnError)
-var verbose = fl.Bool("v", false, "Verbose")
+var verbose = fl.Bool("v", false, "verbose")
 
 func main() {
 	var err error
@@ -222,6 +222,7 @@ func patch(basis, delta, newfile string, checkFile bool) error {
 	var decodeError error
 	go func() {
 		defer close(ops)
+		defer close(hashOps)
 		decodeError = deltaDecode.ReadOperations(ops, hashOps)
 	}()
 
@@ -236,15 +237,15 @@ func patch(basis, delta, newfile string, checkFile bool) error {
 	if decodeError != nil {
 		return decodeError
 	}
-	if checkFile == false {
+	if !checkFile {
 		return nil
 	}
 	hashOp := <-hashOps
 	if hashOp.Data == nil {
-		return NoTargetSumError
+		return ErrNoTargetSum
 	}
-	if bytes.Equal(hashOp.Data, hasher.Sum(nil)) == false {
-		return HashNoMatchError
+	if !bytes.Equal(hashOp.Data, hasher.Sum(nil)) {
+		return ErrHashNoMatch
 	}
 
 	return nil
@@ -273,7 +274,7 @@ func test(basis1, basis2 string) error {
 	}
 
 	if basis1Stat.Size() != basis2Stat.Size() {
-		return fmt.Errorf("File size different.")
+		return fmt.Errorf("file size different")
 	}
 
 	type resetBuffer struct {
@@ -311,7 +312,7 @@ func test(basis1, basis2 string) error {
 					close(source)
 					return
 				}
-				errorSource <- fmt.Errorf("Error reading file: %s", err)
+				errorSource <- fmt.Errorf("error reading file: %w", err)
 				return
 			}
 		}
@@ -350,19 +351,11 @@ func test(basis1, basis2 string) error {
 
 		for i := 0; i < size; i++ {
 			if b1Buffer.buf[i] != b2Buffer.buf[i] {
-				return fmt.Errorf("FAIL: Bytes differ at %d.", location)
+				return fmt.Errorf("FAIL: bytes differ at %d", location)
 			}
 			location++
 		}
 		b1Buffer.buf = b1Buffer.buf[size:]
 		b2Buffer.buf = b2Buffer.buf[size:]
 	}
-	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
