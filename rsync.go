@@ -113,7 +113,7 @@ func (r *RSync) CreateSignature(target io.Reader, sw SignatureWriter) error {
 		}
 		block = buffer[:n]
 		weak, _, _ := βhash(block)
-		err = sw(BlockHash{StrongHash: r.uniqueHash(block), WeakHash: weak, Index: index})
+		err = sw(BlockHash{StrongHash: r.uniqueHash(block, nil), WeakHash: weak, Index: index})
 		if err != nil {
 			return err
 		}
@@ -232,16 +232,22 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 	var rolling, foundHash bool
 	var eof bool
 
+	var scratch []byte
+	if r.UniqueHasher != nil {
+		scratch = make([]byte, r.UniqueHasher.Size())
+	}
+
 	// Store the previous non-data operation for combining.
-	var prevOp *Operation
+	var prevOp Operation
+	var prevOpSet bool
 
 	// Send the last operation if there is one waiting.
 	defer func() {
-		if prevOp == nil {
+		if !prevOpSet {
 			return
 		}
-		err = ops(*prevOp)
-		prevOp = nil
+		err = ops(prevOp)
+		prevOpSet = false
 	}()
 
 	// Combine OpBlock into OpBlockRange. To do this store the previous
@@ -249,15 +255,16 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 	enqueue := func(op Operation) (err error) {
 		switch op.Type {
 		case OpBlock:
-			if prevOp != nil {
+			if prevOpSet {
 				switch prevOp.Type {
 				case OpBlock:
 					if prevOp.BlockIndex+1 == op.BlockIndex {
-						prevOp = &Operation{
+						prevOp = Operation{
 							Type:          OpBlockRange,
 							BlockIndex:    prevOp.BlockIndex,
 							BlockIndexEnd: op.BlockIndex,
 						}
+						// prevOpSet is already true
 						return
 					}
 				case OpBlockRange:
@@ -266,17 +273,18 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 						return
 					}
 				}
-				err = ops(*prevOp)
+				err = ops(prevOp)
 				if err != nil {
 					return
 				}
-				prevOp = nil
+				prevOpSet = false
 			}
-			prevOp = &op
+			prevOp = op
+			prevOpSet = true
 		case OpData:
 			// Never save a data operation, as it would corrupt the buffer.
-			if prevOp != nil {
-				err = ops(*prevOp)
+			if prevOpSet {
+				err = ops(prevOp)
 				if err != nil {
 					return
 				}
@@ -285,7 +293,7 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 			if err != nil {
 				return
 			}
-			prevOp = nil
+			prevOpSet = false
 		}
 		return
 	}
@@ -349,7 +357,7 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 		// Determine if there is a hash match.
 		foundHash = false
 		if hh, ok := hashLookup[β]; ok {
-			blockIndex, foundHash = findUniqueHash(hh, r.uniqueHash(buffer[sum.tail:sum.head]))
+			blockIndex, foundHash = findUniqueHash(hh, r.uniqueHash(buffer[sum.tail:sum.head], scratch[:0]))
 		}
 		// Send data off if there is data available and a hash is found (so the buffer before it
 		// must be flushed first), or the data chunk size has reached it's maximum size (for buffer
@@ -399,10 +407,10 @@ func (r *RSync) CreateDelta(source io.Reader, signature []BlockHash, ops Operati
 }
 
 // Use a more unique way to identify a set of bytes.
-func (r *RSync) uniqueHash(v []byte) []byte {
+func (r *RSync) uniqueHash(v []byte, dst []byte) []byte {
 	r.UniqueHasher.Reset()
 	r.UniqueHasher.Write(v)
-	return r.UniqueHasher.Sum(nil)
+	return r.UniqueHasher.Sum(dst)
 }
 
 // Searches for a given strong hash among all strong hashes in this bucket.
