@@ -2,7 +2,7 @@ package rsync
 
 import (
 	"bytes"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -10,11 +10,12 @@ func benchmarkRsync(b *testing.B, size int) {
 	srcData := make([]byte, size)
 	dstData := make([]byte, size)
 
-	rand.Read(srcData)
+	cc := &rand.ChaCha8{}
+	cc.Read(srcData)
 	copy(dstData, srcData)
-	// Change some bytes to force delta
-	for i := 0; i < 100; i++ {
-		dstData[rand.Intn(size)] = byte(rand.Int())
+	// Change some bytes to force delta.
+	for range 100 {
+		dstData[cc.Uint64()%uint64(size)] = byte(cc.Uint64())
 	}
 
 	b.ResetTimer()
@@ -38,7 +39,7 @@ func benchmarkRsync(b *testing.B, size int) {
 			}, nil)
 		}()
 
-		// Drain ops
+		// Drain ops.
 		for range ops {
 		}
 	}
